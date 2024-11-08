@@ -1,124 +1,186 @@
 import sys
 from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QMainWindow, QDesktopWidget, QVBoxLayout, QWidget, QLabel, QComboBox, QApplication
-from edgeDetection import EdgeDetectionFeatureWindow
-from histogram import HistogramFeatureWindow
-from faceRecognition import FaceDetectionFeatureWindow
-from imageCropper import ImageCropperWindow
-from imageSegmentation import ColorSegmentationApp
-from histogramMatching import HistogramMatchingApp
-from restoration import RestorationApp
-from morphology import MorphologyApp  # Import from the separated file
+from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QWidget, QLabel, QComboBox, QPushButton, QFileDialog, QHBoxLayout, QGroupBox
+from PyQt5.QtGui import QPixmap, QImage
+import cv2
+import numpy as np
 
-class MainMenuWindow(QMainWindow):
+class MorphologyApp(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        # Setting the title and initial window geometry
-        self.setWindowTitle('Main Menu')
-        self.setGeometry(0, 0, 500, 400)  # Adjust window size as needed
+        # Atur judul dan ukuran jendela utama
+        self.setWindowTitle('Morphology Operations')
+        self.setGeometry(100, 100, 900, 500)
 
-        # Center the window on the screen
-        cwa = self.frameGeometry()
-        cwc = QDesktopWidget().availableGeometry().center()
-        cwa.moveCenter(cwc)
-        self.move(cwa.topLeft())
+        # Mengatur warna latar belakang
+        self.setStyleSheet("background-color: #DFF2EB;")
 
-        # Main layout for the menu
-        layout = QVBoxLayout()
+        # Tata letak utama untuk operasi morfologi
+        main_layout = QVBoxLayout()
 
-        # Styling the window using a stylesheet for a more modern and colorful UI
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f0f0f0;
-            }
-            QLabel {
-                font-family: Arial, sans-serif;
-                color: #333333;
-            }
-            QComboBox {
-                font-size: 16px;
-                font-family: Arial, sans-serif;
-                padding: 5px;
-                margin: 10px 0;
-                background-color: #ffffff;
-                border: 2px solid #cccccc;
-                border-radius: 8px;
-            }
-            QComboBox:hover {
-                border-color: #66b3ff;
-            }
-        """)
-
-        # Title label with styling
-        self.title_label = QLabel('Select a Feature', self)
-        self.title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2a2a2a; padding: 10px;")
+        # Label judul
+        self.title_label = QLabel('Pilih Operasi Morfologi dan Unggah Gambar', self)
+        self.title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #333333; padding: 5px;")
         self.title_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.title_label)
+        main_layout.addWidget(self.title_label)
 
-        # Combo box with styling for feature selection
-        self.feature_combo = QComboBox(self)
-        self.feature_combo.addItem("Histogram Equalization")
-        self.feature_combo.addItem("Face & Blur Detection")
-        self.feature_combo.addItem("Edge Detection")
-        self.feature_combo.addItem("Image Segmentation")
-        self.feature_combo.addItem("Histogram Matching")
-        self.feature_combo.addItem("Image Cropper")
-        self.feature_combo.addItem("Image Restoration")
-        self.feature_combo.addItem("Morphology")  # New feature added
-        self.feature_combo.setStyleSheet("""
+        # Combo box untuk memilih operasi morfologi
+        self.morphology_combo = QComboBox(self)
+        self.morphology_combo.addItem("Dilation")
+        self.morphology_combo.addItem("Erosion")
+        self.morphology_combo.addItem("Opening")
+        self.morphology_combo.addItem("Closing")
+        self.morphology_combo.setFixedWidth(180)
+        self.morphology_combo.setStyleSheet("""
             QComboBox {
+                background-color: #B9E5E8;
+                color: black;
                 font-size: 14px;
-                font-family: 'Segoe UI', sans-serif;
-                background-color: #ffffff;
-                border: 1px solid #bfbfbf;
+                padding: 5px;
+                border: 1px solid #B59F78;
                 border-radius: 5px;
-                padding: 8px;
-            }
-            QComboBox::drop-down {
-                border-left: 1px solid #bbbbbb;
             }
         """)
-        self.feature_combo.activated[str].connect(self.open_feature)
-        layout.addWidget(self.feature_combo, alignment=Qt.AlignCenter)
+        main_layout.addWidget(self.morphology_combo, alignment=Qt.AlignCenter)
 
-        # Set main layout to the central widget
+        # Tombol untuk mengunggah gambar
+        self.upload_button = QPushButton('Unggah Gambar', self)
+        self.upload_button.clicked.connect(self.upload_image)
+        self.upload_button.setFixedWidth(180)
+        self.upload_button.setStyleSheet("""
+            QPushButton {
+                background-color: #B9E5E8;
+                color: black;
+                font-size: 14px;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #B59F78;
+            }
+        """)
+        main_layout.addWidget(self.upload_button, alignment=Qt.AlignCenter)
+
+        # Tombol untuk menerapkan operasi yang dipilih
+        self.apply_button = QPushButton('Terapkan Operasi', self)
+        self.apply_button.clicked.connect(self.apply_morphology)
+        self.apply_button.setEnabled(False)
+        self.apply_button.setFixedWidth(180)
+        self.apply_button.setStyleSheet("""
+            QPushButton {
+                background-color: #B9E5E8;
+                color: black;
+                font-size: 14px;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #B59F78;
+            }
+        """)
+        main_layout.addWidget(self.apply_button, alignment=Qt.AlignCenter)
+
+        # Tata letak untuk menampilkan gambar asli dan gambar yang telah diproses
+        self.image_layout = QHBoxLayout()
+
+        # Group box untuk gambar asli
+        self.original_group = QGroupBox("Gambar Asli")
+        original_layout = QVBoxLayout()
+        self.original_image_label = QLabel(self)
+        self.original_image_label.setAlignment(Qt.AlignCenter)
+        self.original_image_label.setFixedSize(400, 300)
+        original_layout.addWidget(self.original_image_label)
+        self.original_group.setLayout(original_layout)
+        self.image_layout.addWidget(self.original_group)
+
+        # Group box untuk gambar yang diproses
+        self.processed_group = QGroupBox("Gambar yang Diproses")
+        processed_layout = QVBoxLayout()
+        self.processed_image_label = QLabel(self)
+        self.processed_image_label.setAlignment(Qt.AlignCenter)
+        self.processed_image_label.setFixedSize(400, 300)
+        processed_layout.addWidget(self.processed_image_label)
+        self.processed_group.setLayout(processed_layout)
+        self.image_layout.addWidget(self.processed_group)
+
+        # Tambahkan tata letak gambar ke tata letak utama
+        main_layout.addLayout(self.image_layout)
+
+        # Setel tata letak utama sebagai tata letak pusat jendela
         central_widget = QWidget()
-        central_widget.setLayout(layout)
+        central_widget.setLayout(main_layout)
         self.setCentralWidget(central_widget)
 
-        # Adjust spacing and padding for a more appealing layout
-        layout.setContentsMargins(50, 50, 50, 50)
-        layout.setSpacing(20)
+        self.img = None  # Placeholder untuk gambar yang diunggah
 
-    def open_feature(self, feature_name):
-        if feature_name == "Histogram Equalization":
-            self.histogram_window = HistogramFeatureWindow()
-            self.histogram_window.show()
-        elif feature_name == "Face & Blur Detection":
-            self.face_detection_window = FaceDetectionFeatureWindow()
-            self.face_detection_window.show()
-        elif feature_name == "Edge Detection":
-            self.edge_detection_window = EdgeDetectionFeatureWindow()
-            self.edge_detection_window.show()
-        elif feature_name == "Image Segmentation":
-            self.segmentation_window = ColorSegmentationApp()
-            self.segmentation_window.show()
-        elif feature_name == "Histogram Matching":
-            self.histogram_matching_window = HistogramMatchingApp()
-            self.histogram_matching_window.show()
-        elif feature_name == "Image Cropper":
-            self.cropper_window = ImageCropperWindow()
-            self.cropper_window.show()
-        elif feature_name == "Image Restoration":
-            self.restoration_window = RestorationApp()
-            self.restoration_window.show()
-        elif feature_name == "Morphology":  # Opening the new Morphology feature
-            self.morphology_window = MorphologyApp()
-            self.morphology_window.show()
+    def upload_image(self):
+        # Buka dialog file untuk memilih gambar
+        file_name, _ = QFileDialog.getOpenFileName(self, 'Buka File Gambar', '', 'Image Files (*.png *.jpg *.bmp)')
+        if file_name:
+            # Baca dan tampilkan gambar
+            self.img = cv2.imread(file_name)
+            self.display_image(self.img, self.original_image_label)
+            self.apply_button.setEnabled(True)  # Aktifkan tombol "Terapkan Operasi"
+
+    def apply_morphology(self):
+        if self.img is None:
+            return
+
+        # Kernel untuk operasi morfologi (ukuran 5x5)
+        kernel = np.ones((5, 5), np.uint8)
+
+        # Dapatkan operasi morfologi yang dipilih dari combo box
+        selected_operation = self.morphology_combo.currentText()
+
+        # Terapkan operasi morfologi yang dipilih
+        if selected_operation == "Dilation":
+            result = self.apply_dilation(self.img, kernel)
+        elif selected_operation == "Erosion":
+            result = self.apply_erosion(self.img, kernel)
+        elif selected_operation == "Opening":
+            result = self.apply_opening(self.img, kernel)
+        elif selected_operation == "Closing":
+            result = self.apply_closing(self.img, kernel)
+
+        # Tampilkan gambar yang telah diproses
+        self.display_image(result, self.processed_image_label)
+
+    def apply_dilation(self, img, kernel):
+        # Terapkan operasi dilasi
+        dilated_img = cv2.dilate(img, kernel, iterations=1)
+        return dilated_img
+
+    def apply_erosion(self, img, kernel):
+        # Terapkan operasi erosi
+        eroded_img = cv2.erode(img, kernel, iterations=1)
+        return eroded_img
+
+    def apply_opening(self, img, kernel):
+        # Terapkan operasi opening (erosi diikuti oleh dilasi)
+        opening = cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+        return opening
+
+    def apply_closing(self, img, kernel):
+        # Terapkan operasi closing (dilasi diikuti oleh erosi)
+        closing = cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel)
+        return closing
+
+    def display_image(self, img, label):
+        # Konversi gambar dari BGR (format OpenCV) ke RGB (format QImage)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w, ch = img_rgb.shape
+        bytes_per_line = ch * w
+        q_img = QImage(img_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+
+        # Konversi QImage menjadi QPixmap dan tampilkan pada label
+        pixmap = QPixmap.fromImage(q_img)
+
+        # Sesuaikan agar tidak pecah, dengan menetapkan skala pixmap pada resolusi yang tepat
+        label.setPixmap(pixmap.scaled(label.width(), label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    main_window = MainMenuWindow()
-    main_window.show()
+    morphology_window = MorphologyApp()
+    morphology_window.show()
     sys.exit(app.exec_())
